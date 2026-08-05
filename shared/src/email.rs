@@ -279,6 +279,35 @@ mod tests {
     }
 
     #[test]
+    fn test_clean_svg_animation_tags() {
+        // RUSTSEC-2026-0213: `animate`/`set` inside SVG can smuggle a javascript:
+        // URL past the sanitizer, but only when svg is added to the allowlist.
+        // Ours doesn't add it; this pins that so the advisory stays unreachable.
+        let input = r#"<svg><a><animate attributeName="href" values="javascript:alert(1)"/><set attributeName="href" to="javascript:alert(1)"/>click</a></svg>"#;
+
+        let cleaned = clean_html(input.to_string());
+        assert!(!cleaned.contains("<animate"), "leaked animate: {}", cleaned);
+        assert!(!cleaned.contains("<set"), "leaked set: {}", cleaned);
+        assert!(!cleaned.contains("javascript:"), "leaked js: {}", cleaned);
+    }
+
+    #[test]
+    fn test_clean_mathml_annotation_xml() {
+        // RUSTSEC-2026-0193: mXSS where `annotation-xml` re-parses its escaped
+        // content as HTML, reachable only if math/annotation-xml are allowlisted.
+        // Ours aren't; the wrapper is dropped and the payload stays inert text.
+        let input = r#"<math><annotation-xml encoding="text/html">&lt;script&gt;alert(1)&lt;/script&gt;</annotation-xml></math>"#;
+
+        let cleaned = clean_html(input.to_string());
+        assert!(
+            !cleaned.contains("<annotation-xml"),
+            "leaked annotation-xml: {}",
+            cleaned
+        );
+        assert!(!cleaned.contains("<script"), "leaked script: {}", cleaned);
+    }
+
+    #[test]
     fn test_clean_img_tags_data_url_kept() {
         // These are great, no http, keep them
         let input = r#"<img src="data:image/png;base64,base64encodedimage">"#;
