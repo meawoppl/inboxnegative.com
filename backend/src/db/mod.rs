@@ -22,8 +22,10 @@ pub type DbConnection = r2d2::PooledConnection<ConnectionManager<PgConnection>>;
 
 /// Create a new database connection pool
 pub fn create_pool() -> Result<Arc<DbPool>> {
-    // Load environment variables from .env file if present
-    dotenv::dotenv().ok();
+    // Load environment variables from .env file if present. `.ok()` is load-bearing:
+    // production runs on real environment variables with no .env file, so a missing
+    // file must stay non-fatal.
+    dotenvy::dotenv().ok();
 
     // Get the database URL from environment variables
     let database_url = env::var("DATABASE_URL").context("DATABASE_URL must be set")?;
