@@ -1,5 +1,20 @@
 # AWS Deployment Guide for InboxNegative
 
+> ## ⚠️ HISTORICAL — this is not how the service is deployed
+>
+> The AWS/ECS topology described below was **retired during the 2026-08 GHCR
+> migration**. The ECS cluster, ECR repository, NLB, and EC2 instance referenced
+> here are gone, and `./push-to-ecr.sh` does not exist in this repository.
+>
+> Deployment today builds an image in CI and publishes it to **GHCR**
+> (`.github/workflows/container.yml`). See the Infrastructure section of
+> `CLAUDE.md` for the current picture and for which parts of it are
+> repo-verified versus reported.
+>
+> This document is kept so the old topology stays recoverable. **Do not follow it
+> as a runbook**, and do not treat any account ID, IP address, hostname, or ARN in
+> it as live.
+
 This guide documents the complete AWS infrastructure setup for the InboxNegative application, including ECS deployment, DNS configuration, and SSL/HTTPS setup.
 
 ## Table of Contents
