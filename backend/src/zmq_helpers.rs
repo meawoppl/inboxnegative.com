@@ -6,6 +6,7 @@ use lazy_static::lazy_static;
 use log::{debug, error, info, warn};
 use shared::email::Email;
 use std::cell::Cell;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::task::{Context as TaskContext, Waker};
 use std::thread;
@@ -22,9 +23,57 @@ use crate::attachments::AttachmentStore;
 // seem to figure out how to debug that
 // Seems to be related to this: https://stackoverflow.com/a/67758135/25641012
 
-// Generate unique ZMQ socket path per process to avoid conflicts during deployments
+/// Directory holding the ipc socket file. Absolute by construction: ZMQ resolves
+/// a relative `ipc://` address against the working directory, which made correct
+/// operation depend on cwd being writable -- an implicit requirement that nothing
+/// stated or checked, and that once crash-looped production when the image gained
+/// `USER appuser` with no `WORKDIR` and cwd became `/`.
+///
+/// `ZMQ_SOCKET_DIR` overrides, then `XDG_RUNTIME_DIR`, else `/tmp`. A relative
+/// override is refused rather than honoured -- accepting one would reintroduce
+/// exactly the cwd dependency this exists to remove.
+fn socket_dir() -> PathBuf {
+    let from_env = [ZMQ_SOCKET_DIR_VAR, "XDG_RUNTIME_DIR"]
+        .into_iter()
+        .find_map(|var| std::env::var(var).ok().map(|val| (var, val)));
+
+    match from_env {
+        Some((_, val)) if Path::new(&val).is_absolute() => PathBuf::from(val),
+        Some((var, val)) => {
+            warn!(
+                "{} is relative ({:?}); using {} instead so the socket path does not depend on cwd",
+                var, val, DEFAULT_SOCKET_DIR
+            );
+            PathBuf::from(DEFAULT_SOCKET_DIR)
+        }
+        None => PathBuf::from(DEFAULT_SOCKET_DIR),
+    }
+}
+
+const ZMQ_SOCKET_DIR_VAR: &str = "ZMQ_SOCKET_DIR";
+const DEFAULT_SOCKET_DIR: &str = "/tmp";
+
+/// Filesystem path of the ipc socket. The pid keeps concurrent deployments from
+/// stomping each other during handover.
+fn local_publisher_path() -> PathBuf {
+    socket_dir().join(format!("local_publisher_{}", std::process::id()))
+}
+
 fn get_local_publisher_addr() -> String {
-    format!("ipc://local_publisher_{}", std::process::id())
+    format!("ipc://{}", local_publisher_path().display())
+}
+
+/// Remove this process's socket file. ZMQ does not unlink it on close, so without
+/// this every run leaves one behind and they accumulate indefinitely across
+/// restarts. Best-effort by design: failing to clean up is not worth a failed
+/// shutdown, and `NotFound` is the normal case when the publisher never bound.
+pub fn cleanup_local_publisher() {
+    let path = local_publisher_path();
+    match std::fs::remove_file(&path) {
+        Ok(()) => debug!("Removed ZMQ socket file {}", path.display()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => warn!("Could not remove ZMQ socket file {}: {}", path.display(), e),
+    }
 }
 
 lazy_static! {
@@ -51,13 +100,13 @@ pub fn bind_local_publisher() -> Result<Socket, zmq::Error> {
                 break;
             }
             Err(e) => {
-                // The address is relative, so the socket lands in the working
-                // directory -- log both, since a permission failure here is
-                // almost always an unwritable cwd rather than a ZMQ problem.
+                // The address is absolute, so a permission failure points at the
+                // socket directory rather than at cwd. Name it, and how to change
+                // it, since that is the actionable part.
                 warn!(
-                    "Error binding to local publisher at {} (cwd {:?}): {:?} Attempt ({}/{})",
+                    "Error binding to local publisher at {} (set {} to relocate): {:?} Attempt ({}/{})",
                     addr,
-                    std::env::current_dir(),
+                    ZMQ_SOCKET_DIR_VAR,
                     e,
                     i + 1,
                     max_attempts
@@ -221,6 +270,67 @@ mod tests {
     use super::*;
     use serial_test::serial;
     use std::{thread::sleep, time::Duration};
+
+    /// The whole point of #5: the address must never be resolved against cwd.
+    #[test]
+    #[serial]
+    fn test_publisher_addr_is_absolute() {
+        let addr = get_local_publisher_addr();
+        let path = addr.strip_prefix("ipc://").expect("ipc:// scheme");
+        assert!(
+            Path::new(path).is_absolute(),
+            "socket path must be absolute, got {addr}"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_socket_dir_honours_absolute_override() {
+        let restore = std::env::var(ZMQ_SOCKET_DIR_VAR).ok();
+        // SAFETY: tests touching this var are #[serial], so no other thread reads
+        // the environment concurrently.
+        unsafe { std::env::set_var(ZMQ_SOCKET_DIR_VAR, "/var/run/inboxnegative") };
+
+        assert_eq!(socket_dir(), PathBuf::from("/var/run/inboxnegative"));
+
+        unsafe {
+            match restore {
+                Some(v) => std::env::set_var(ZMQ_SOCKET_DIR_VAR, v),
+                None => std::env::remove_var(ZMQ_SOCKET_DIR_VAR),
+            }
+        }
+    }
+
+    /// A relative override must be refused, not honoured -- honouring it would
+    /// reintroduce the cwd dependency the absolute path exists to remove.
+    #[test]
+    #[serial]
+    fn test_socket_dir_refuses_relative_override() {
+        let restore = std::env::var(ZMQ_SOCKET_DIR_VAR).ok();
+        // SAFETY: as above.
+        unsafe { std::env::set_var(ZMQ_SOCKET_DIR_VAR, "some/relative/dir") };
+
+        let dir = socket_dir();
+        assert!(dir.is_absolute(), "expected absolute fallback, got {dir:?}");
+        assert_eq!(dir, PathBuf::from(DEFAULT_SOCKET_DIR));
+
+        unsafe {
+            match restore {
+                Some(v) => std::env::set_var(ZMQ_SOCKET_DIR_VAR, v),
+                None => std::env::remove_var(ZMQ_SOCKET_DIR_VAR),
+            }
+        }
+    }
+
+    /// Cleanup must be safe to call when nothing bound -- it runs unconditionally
+    /// on the shutdown path.
+    #[test]
+    #[serial]
+    fn test_cleanup_is_idempotent() {
+        cleanup_local_publisher();
+        cleanup_local_publisher();
+        assert!(!local_publisher_path().exists());
+    }
 
     #[test]
     #[serial]

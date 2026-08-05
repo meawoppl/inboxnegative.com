@@ -239,5 +239,9 @@ async fn main() -> std::io::Result<()> {
 
     runtime.shutdown_background();
 
+    // ZMQ leaves the ipc socket file behind on close; remove ours so they do not
+    // accumulate across restarts.
+    zmq_helpers::cleanup_local_publisher();
+
     Ok(())
 }
