@@ -51,19 +51,35 @@ cargo machete
 ```
 
 ## Continuous Integration
-CI (`.github/workflows/rust.yml`) runs these jobs on every push/PR to `main`:
+Two workflows run on every push/PR to `main`. **All seven jobs are required** — they
+are enforced as required status checks by branch protection on `main`, so a failure
+blocks merge rather than merely reporting.
 
-| Job | Required? | What it checks |
-|-----|-----------|----------------|
-| Rustfmt | yes | `cargo fmt --all --check` |
-| Clippy | yes | `clippy` under `-Dwarnings`, split by target (host crates + wasm frontend) |
-| Build & Test | yes | backend build, `trunk build` frontend, `cargo test` |
-| Security Audit | no (advisory) | `cargo audit` |
+From `.github/workflows/rust.yml`:
+
+| Job | What it checks |
+|-----|----------------|
+| Rustfmt | `cargo fmt --all --check` |
+| Clippy | `clippy` under `-Dwarnings`, split by target (host crates + wasm frontend) |
+| Build & Test | `trunk build` frontend, backend build, `cargo test` |
+| Security Audit | `cargo audit` |
+| Migration Names | `./scripts/check-migration-names.sh` |
+
+From `.github/workflows/container.yml`:
+
+| Job | What it checks |
+|-----|----------------|
+| Build Release Artifacts | release frontend (`trunk build --release`) + release backend |
+| Build Container | `docker build` of the runtime image (pushes to GHCR only on `main`) |
 
 Notes:
 - Clippy is split per target because the wasm frontend can't be linted for the host
   target. Run both invocations locally before pushing.
-- The Security Audit job is `continue-on-error` (advisory only). The `ignore` list in
+- The Clippy job creates an empty `frontend/dist` rather than running `trunk`:
+  rust-embed needs the directory to exist at compile time, but clippy only
+  type-checks and never reads the assets. Build & Test does the real `trunk build`.
+- The Security Audit job is **blocking** (it was `continue-on-error` while an
+  advisory backlog existed; that backlog is cleared). The `ignore` list in
   `.cargo/audit.toml` is deliberately **empty** — every advisory is fixed outright
   rather than waived. Prefer upgrading; only add an entry when no patched version
   exists, and state the *condition* that makes it non-applicable, not just the
