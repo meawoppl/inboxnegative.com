@@ -59,9 +59,10 @@ jobs:
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
-    # Advisory only for now: there is an existing backlog of RUSTSEC advisories
-    # from older deps. Surface them without blocking merges until deps are bumped.
-    continue-on-error: true
+    # Blocking. The advisory backlog this used to tolerate is cleared, and the
+    # `ignore` list in .cargo/audit.toml is empty, so a failure here means a new
+    # advisory landed against a dependency we actually ship -- worth stopping for.
+    # `unmaintained` advisories stay informational and do not fail the job.
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
