@@ -1,0 +1,92 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    # Run every 5 days to keep the cache warm (caches expire after 7 days)
+    - cron: '0 0 */5 * *'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-Dwarnings"
+
+jobs:
+  migrations:
+    name: Migration Names
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check migration naming convention
+        run: ./scripts/check-migration-names.sh
+
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "rust-v0" # Use to manually break cache
+          shared-key: "clippy"
+      # rust-embed requires frontend/dist to exist at compile time. Clippy only
+      # type-checks (never reads the assets), so an empty dir is sufficient and
+      # avoids a full trunk build here.
+      - name: Ensure frontend asset dir exists
+        run: mkdir -p frontend/dist
+      - name: Clippy (backend + shared)
+        run: cargo clippy -p inboxnegative -p shared --all-targets --locked
+      - name: Clippy (frontend, wasm)
+        run: cargo clippy -p inboxnegativefrontend --target wasm32-unknown-unknown --locked
+
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    # Advisory only for now: there is an existing backlog of RUSTSEC advisories
+    # from older deps. Surface them without blocking merges until deps are bumped.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Run security audit
+        run: cargo audit
+
+  build-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "rust-v0" # Use to manually break cache
+          shared-key: "build-test"
+      # Frontend must be built before the backend: rust-embed needs frontend/dist
+      # at compile time, and the tests read the assets at runtime.
+      - name: Build frontend
+        run: cd frontend && ./setup.sh && trunk build
+      - name: Build backend
+        run: cd backend && cargo build --verbose --locked
+      - name: Run tests
+        run: cargo test --locked

@@ -1,0 +1,633 @@
+:root {
+    --primary-color: #2c3e50;
+    --secondary-color: #3498db;
+    --accent-color: #e74c3c;
+    --text-light: #ecf0f1;
+    --text-dark: #2c3e50;
+    --bg-blue: #e3f2fd;
+    --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    --border-radius: 8px;
+}
+
+body {
+    background-color: var(--bg-blue);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    padding: 0;
+    line-height: 1.6;
+    color: var(--text-dark);
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.header {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 1.5rem;
+    border-radius: var(--border-radius);
+    margin-bottom: 2rem;
+    box-shadow: var(--shadow);
+}
+
+.header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.header-left {
+    text-align: left;
+}
+
+.header-left h1 {
+    margin: 0;
+    font-size: 2rem;
+    color: white;
+}
+
+.header-brand {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.header-logo {
+    width: 96px;
+    height: 96px;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+}
+
+.header-left p {
+    color: #ecf0f1;
+    opacity: 0.9;
+    margin: 0.5rem 0 0 0;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+}
+
+.header-stats {
+    display: flex;
+    gap: 2rem;
+}
+
+.stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+
+.stat-label {
+    font-size: 0.9rem;
+    opacity: 0.9;
+    color: #ecf0f1;
+}
+
+.stat-value {
+    font-size: 1.4rem;
+    font-weight: bold;
+    color: white;
+}
+
+.logout-button {
+    background-color: var(--accent-color);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    text-decoration: none;
+}
+
+.logout-button:hover {
+    background-color: #c0392b;
+    text-decoration: none;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.signin-button {
+    background-color: var(--secondary-color);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    text-decoration: none;
+}
+
+.signin-button:hover {
+    background-color: #2980b9;
+    text-decoration: none;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.simple {
+    margin: 15px 0;
+    text-align: left;
+    background-color: white;
+    color: var(--text-dark);
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow);
+    padding: 20px;
+    white-space: pre-wrap;
+}
+
+.login-box {
+    background-color: white;
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow);
+    padding: 30px;
+    margin: 2rem auto;
+    max-width: 400px;
+    text-align: center;
+}
+
+.login-box img {
+    margin-bottom: 20px;
+    transition: transform 0.3s ease;
+}
+
+.login-box img:hover {
+    transform: scale(1.05);
+}
+
+.test-login {
+    margin-top: 20px;
+}
+
+.test-login-link {
+    color: white;
+    background-color: #4285f4;
+    padding: 10px 20px;
+    border-radius: 4px;
+    text-decoration: none;
+    font-weight: bold;
+    display: inline-block;
+    transition: background-color 0.3s ease;
+}
+
+.test-login-link:hover {
+    background-color: #3367d6;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.center {
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.nested {
+    padding: 15px;
+    border-radius: var(--border-radius);
+    background-color: #f8f9fa;
+    margin-bottom: 15px;
+    border-left: 4px solid var(--secondary-color);
+}
+
+.nested > .nested {
+    background-color: #f1f4f7;
+}
+
+.nested > .nested > .nested {
+    background-color: #e9ecef;
+}
+
+h1 {
+    text-align: center;
+    color: var(--primary-color);
+    margin-top: 0;
+}
+
+a {
+    color: var(--secondary-color);
+    text-decoration: none;
+    transition: color 0.3s ease;
+}
+
+a:hover {
+    color: var(--accent-color);
+    text-decoration: underline;
+}
+
+p {
+    margin-bottom: 1rem;
+}
+
+/* Email styling */
+.email-frame {
+    background-color: #ffffff;
+    border-radius: var(--border-radius);
+    border: 1px solid #e1e4e8;
+    box-shadow: var(--shadow);
+    margin: 20px 0;
+    overflow: hidden;
+    max-width: 800px;
+    margin-left: auto;
+    margin-right: auto;
+    transition: transform 0.2s ease;
+}
+
+.email-frame:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+}
+
+.email-header {
+    background-color: #f8f9fa;
+    padding: 15px 20px;
+    border-bottom: 1px solid #e1e4e8;
+}
+
+.email-header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+}
+
+.email-header-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.email-from {
+    font-weight: bold;
+    font-size: 0.95rem;
+    margin-bottom: 5px;
+    color: var(--text-dark);
+}
+
+.email-subject {
+    font-size: 1.2rem;
+    margin-bottom: 0;
+    color: var(--text-dark);
+    font-weight: 500;
+}
+
+.email-delete-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    opacity: 0.6;
+    flex-shrink: 0;
+}
+
+.email-delete-btn:hover {
+    opacity: 1;
+    background-color: #fee;
+    transform: scale(1.1);
+}
+
+.email-body {
+    padding: 20px;
+    background-color: white;
+    color: var(--text-dark);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.email-content {
+    display: block;
+    width: 100%;
+    min-height: 200px;
+}
+
+.email-plaintext {
+    white-space: pre-wrap;
+    font-family: monospace;
+    background-color: #f8f9fa;
+    padding: 15px;
+    border-radius: 4px;
+    border: 1px solid #e1e4e8;
+}
+
+.email-raw {
+    white-space: pre-wrap;
+    font-family: monospace;
+    color: #6c757d;
+    font-size: 0.85rem;
+    background-color: #f8f9fa;
+    padding: 15px;
+    border-radius: 4px;
+    border: 1px solid #e1e4e8;
+}
+
+.footer {
+    text-align: center;
+    padding: 20px;
+    margin-top: 2rem;
+    border-top: 1px solid #e1e4e8;
+    color: #6c757d;
+}
+
+.stats-counter {
+    margin-bottom: 1.5rem;
+}
+
+.stats-counter h2 {
+    color: var(--primary-color);
+    font-size: 1.8rem;
+    margin-bottom: 0.5rem;
+}
+
+.logout-link {
+    display: inline-block;
+    background-color: var(--accent-color);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 4px;
+    margin: 1rem 0;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    text-decoration: none;
+}
+
+.logout-link:hover {
+    background-color: #c0392b;
+    text-decoration: none;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.copyright {
+    margin-top: 1.5rem;
+    color: #6c757d;
+    font-size: 0.9rem;
+}
+
+.intro-text {
+    line-height: 1.8;
+    margin-bottom: 2rem;
+}
+
+.intro-text h2 {
+    color: var(--primary-color);
+    margin-bottom: 1rem;
+}
+
+.intro-text p {
+    margin-bottom: 1.2rem;
+}
+
+.email-container {
+    margin: 2rem 0;
+}
+
+h2 {
+    color: var(--primary-color);
+    margin-bottom: 1rem;
+}
+
+.login-button {
+    display: inline-block;
+    transition: transform 0.3s ease;
+}
+
+.login-button:hover {
+    transform: scale(1.05);
+}
+
+/* Email copy button styling */
+.email-copy-container {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+}
+
+.email-copy {
+    color: var(--secondary-color);
+    text-decoration: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    border: 1px solid transparent;
+}
+
+.email-copy:hover {
+    background-color: #e3f2fd;
+    border-color: var(--secondary-color);
+    color: #2196f3;
+}
+
+.copy-icon {
+    font-size: 0.9em;
+    opacity: 0.7;
+    transition: opacity 0.3s ease;
+}
+
+.email-copy:hover + .copy-icon {
+    opacity: 1;
+}
+
+.copy-feedback {
+    position: absolute;
+    top: -30px;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: #4caf50;
+    color: white;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.copy-feedback.show {
+    opacity: 1;
+}
+
+.copy-feedback::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    margin-left: -5px;
+    border-width: 5px;
+    border-style: solid;
+    border-color: #4caf50 transparent transparent transparent;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .login-box {
+        width: 90%;
+        padding: 20px;
+    }
+    
+    .email-frame {
+        width: 95%;
+    }
+    
+    .simple {
+        padding: 15px;
+    }
+    
+    .header-content {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1.5rem;
+    }
+    
+    .header-right {
+        width: 100%;
+        justify-content: space-between;
+    }
+    
+    .header-stats {
+        gap: 1rem;
+    }
+    
+    .stat-item {
+        font-size: 0.9rem;
+    }
+    
+    .stat-value {
+        font-size: 1.2rem;
+    }
+}
+
+/* Attachment section styles */
+.email-attachments {
+    margin-top: 20px;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-top: 2px solid #e1e4e8;
+    border-radius: 0 0 var(--border-radius) var(--border-radius);
+}
+
+.email-attachments h3 {
+    margin: 0 0 12px 0;
+    color: var(--primary-color);
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.attachment-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.attachment-item {
+    background-color: white;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+.attachment-item:hover {
+    border-color: var(--secondary-color);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transform: translateX(4px);
+}
+
+.attachment-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    text-decoration: none;
+    color: var(--text-dark);
+    transition: color 0.2s ease;
+}
+
+.attachment-link:hover {
+    text-decoration: none;
+    color: var(--secondary-color);
+}
+
+.attachment-icon {
+    font-size: 1.2rem;
+    flex-shrink: 0;
+}
+
+.attachment-name {
+    flex: 1;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.attachment-size {
+    color: #6c757d;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+}
+
+.attachment-timer {
+    color: #28a745;
+    font-size: 0.85rem;
+    font-weight: 600;
+    flex-shrink: 0;
+    font-family: monospace;
+}
+
+.attachment-timer.expired {
+    color: #dc3545;
+}
+
+.attachment-item.expired {
+    opacity: 0.6;
+    background-color: #f8f9fa;
+}
+
+.attachment-item.expired .attachment-link {
+    cursor: not-allowed;
+    text-decoration: line-through;
+    color: #6c757d;
+}
+
+.attachment-item.expired:hover {
+    border-color: #dee2e6;
+    box-shadow: none;
+    transform: none;
+}
+
+/* Toast notification styles */
+.toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background-color: #333;
+    color: white;
+    padding: 16px 24px;
+    border-radius: 4px;
+    font-size: 0.95rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    opacity: 0;
+    transition: all 0.3s ease;
+    pointer-events: none;
+}
+
+.toast.show {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+    pointer-events: auto;
+}

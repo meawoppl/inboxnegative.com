@@ -1,0 +1,15 @@
+# cargo-audit configuration.
+# Advisories ignored here are ones reviewed and judged not applicable to this
+# application's configuration. See issue #48 for the full triage.
+[advisories]
+ignore = [
+    # QUIC/HTTP3 is not enabled, so quinn-proto is never compiled (lockfile-only).
+    "RUSTSEC-2026-0037",
+    # idna punycode spoofing: not reachable; idna is not in the active dependency
+    # tree (cargo tree -i idna is empty).
+    "RUSTSEC-2024-0421",
+    # rand is only unsound with a custom logger using rand::rng(); not our usage.
+    "RUSTSEC-2026-0097",
+    # tokio broadcast-channel Sync edge case; we do not use broadcast channels.
+    "RUSTSEC-2025-0023",
+]

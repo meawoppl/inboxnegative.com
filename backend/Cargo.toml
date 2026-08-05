@@ -1,0 +1,48 @@
+[package]
+name = "inboxnegative"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+signal-hook = "0.3"  # Use the latest version available
+zmq = "0.10.0"
+sha2 = "0.10.8"
+lazy_static = "1.5.0"
+chrono = {version="0.4.38", features = ["serde"]}
+serde = { version = "1.0.209", features = ["derive"] }
+serde_json = "1.0.127"
+hyper = {version="1.4.1", features=["full"]}
+tokio = {version="^1.40.0", features=["full"]}
+http-body-util = "0.1.2"
+hyper-util = {version="0.1.7", features=["full"]}
+pretty_env_logger = "0.5.0"
+log = "0.4"
+bytes = "1.11"
+tokio-util = {version="0.7.12", features=["full"]}
+futures-util = "0.3.30"
+http-body = "1.0.1"
+base64 = "0.22.1"
+mime_guess = "2.0.5"
+
+# Database
+diesel = { version = "2.3", features = ["postgres", "r2d2", "chrono"] }
+dotenv = "0.15.0"
+r2d2 = "0.8.10"
+anyhow = "1.0"
+
+# OAuth
+reqwest = { version = "0.12.7", default-features = false, features = ["json", "rustls-tls", "charset", "http2", "system-proxy"] }
+jwt = "0.16.0"
+
+shared = { path = "../shared" }
+cookie = "0.18.1"
+tempfile = "3.13.0"
+socket2 = "0.6.1"
+diesel_migrations = "2.3"
+axum = "0.8"
+rust-embed = "8"
+
+
+[dev-dependencies]
+serial_test = "3.1.1"
+tower = { version = "0.5", features = ["util"] }
