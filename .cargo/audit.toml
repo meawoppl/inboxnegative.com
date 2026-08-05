@@ -1,15 +1,16 @@
 # cargo-audit configuration.
-# Advisories ignored here are ones reviewed and judged not applicable to this
-# application's configuration. See issue #48 for the full triage.
+#
+# The ignore list is intentionally empty. Every advisory that previously needed
+# suppressing is now fixed outright in Cargo.lock rather than waived, so the
+# audit passes on its own terms.
+#
+# Before adding an entry here, prefer upgrading. An ignore is only appropriate
+# when no patched version exists. When one is genuinely needed, state the
+# *condition* that makes the advisory non-applicable, not just the conclusion --
+# a rationale that names its own premise fails loudly when that premise stops
+# holding. The entry removed for RUSTSEC-2024-0421 is the cautionary case: it
+# claimed idna was absent from the dependency tree when idna was in fact
+# reachable via url from ammonia, reqwest, and shared, so it suppressed silently
+# on a false premise. See issue #7.
 [advisories]
-ignore = [
-    # QUIC/HTTP3 is not enabled, so quinn-proto is never compiled (lockfile-only).
-    "RUSTSEC-2026-0037",
-    # idna punycode spoofing: not reachable; idna is not in the active dependency
-    # tree (cargo tree -i idna is empty).
-    "RUSTSEC-2024-0421",
-    # rand is only unsound with a custom logger using rand::rng(); not our usage.
-    "RUSTSEC-2026-0097",
-    # tokio broadcast-channel Sync edge case; we do not use broadcast channels.
-    "RUSTSEC-2025-0023",
-]
+ignore = []
