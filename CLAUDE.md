@@ -63,8 +63,14 @@ CI (`.github/workflows/rust.yml`) runs these jobs on every push/PR to `main`:
 Notes:
 - Clippy is split per target because the wasm frontend can't be linted for the host
   target. Run both invocations locally before pushing.
-- The Security Audit job is `continue-on-error` (advisory only). Reviewed advisories
-  that don't apply to our config are ignored in `.cargo/audit.toml` with a rationale.
+- The Security Audit job is `continue-on-error` (advisory only). The `ignore` list in
+  `.cargo/audit.toml` is deliberately **empty** — every advisory is fixed outright
+  rather than waived. Prefer upgrading; only add an entry when no patched version
+  exists, and state the *condition* that makes it non-applicable, not just the
+  conclusion, so it fails loudly when that condition stops holding.
+- `cargo audit` still reports two `unmaintained` warnings (`bincode`,
+  `proc-macro-error`). Both are transitive through `yew` 0.21 and have no patched
+  version; see issue #9. These are informational, not vulnerabilities.
 - All cargo commands run with `--locked`, so `Cargo.lock` must be committed and current.
 
 ## Security
