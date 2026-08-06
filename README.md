@@ -20,7 +20,9 @@ InboxNull now supports using a PostgreSQL database for statistics:
    brew install postgresql
    ```
 
-2. Create a database for InboxNull (or use the existing Neon DB credentials)
+2. Create a local database for development. (The Neon instance this used to point at
+   was retired in the 2026-08 migration — production now runs a self-hosted
+   `postgres:17-alpine` container, and there are no shared credentials to reuse.)
 3. Copy the `.env.example` file to `.env` in the backend directory:
    ```bash
    cp backend/.env.example backend/.env

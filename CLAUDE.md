@@ -100,28 +100,61 @@ Notes:
   still contains it but it carries no risk.
 
 ## Database Information
-- The application now uses PostgreSQL with Diesel ORM for stats storage
+- The application uses PostgreSQL with Diesel ORM for stats storage
 - Database setup requires PostgreSQL client and development libraries
-- Connection string format: postgresql://username:password@hostname/dbname?sslmode=require
-- The Neon DB is configured in backend/.env
+- Migrations are embedded in the binary and applied on startup (`backend/migrations`)
+- The database is **required**. If the pool cannot be created the process logs the
+  reason and exits; there is no file-based fallback
+- Local development reads `DATABASE_URL` from `backend/.env` (gitignored). Production
+  runs a self-hosted `postgres:17-alpine` container, **not** Neon — the Neon project
+  was retired during the 2026-08 GHCR migration
 
-## AWS Infrastructure
+## Infrastructure
 
-### SMTP Port Architecture
-- **App listens on port 2525** (not 25, to avoid privileged port issues in containers)
-- **NLB `inboxnull`** handles port translation: public port 25 → target port 2525
-- NLB DNS: `inboxnull-5879fc3a6213a0c5.elb.us-west-2.amazonaws.com`
-- Target group: `inboxnull-2525` (forwards to ECS tasks on port 2525)
+> **Last verified against the repository: 2026-08-05.** Claims below are split by
+> how they were checked. Anything marked *(repo-verified)* was read out of a file
+> in this tree. Anything marked *(reported)* comes from issue #4 and the 2026-08
+> migration notes and was **not** independently confirmed against a running host —
+> treat it as the best available account, not as ground truth, and re-check before
+> relying on it for anything destructive.
 
-### DNS Configuration for Email Delivery
-- MX record: `mail.inboxnegative.com`
-- **IMPORTANT**: For Gmail/external SMTP delivery to work, `mail.inboxnegative.com` must point to the NLB (not directly to EC2)
-- If mail isn't being received from Gmail, check that DNS points to NLB
-- Direct EC2 IP (18.237.84.151) only has port 2525 open, not port 25
+### Build and image *(repo-verified)*
+- CI builds a release binary and pushes an image to **GHCR**, not ECR:
+  `ghcr.io/meawoppl/inboxnegative.com`, tagged `latest` and the commit SHA
+  (`.github/workflows/container.yml`)
+- On pull requests the image is built but **not** pushed; only pushes to `main` publish
+- The frontend is built with `trunk` *before* the backend, because rust-embed embeds
+  `frontend/dist` into the release binary. The image is the single self-contained
+  binary plus runtime libs — no assets on disk
+- Runs as `appuser` (uid 1001) with `WORKDIR /home/appuser`
+- The Dockerfile **has** a `HEALTHCHECK` hitting `/api/health` — it has been there since
+  #69/#71. Do not describe it as missing; check the file rather than a deployed image
 
-### ECS Deployment
-- Cluster: `inboxnegative-cluster`
-- Service: `inboxnegative-service`
-- Task definition: `inboxnegative-task`
-- ECR repo: `877983347039.dkr.ecr.us-west-2.amazonaws.com/inboxnegative`
-- Deploy script: `./push-to-ecr.sh` (builds, pushes, registers task, updates service)
+### Deployment *(reported)*
+- GHCR image pulled on a single host, run under Docker Compose with Watchtower for
+  image updates, fronted by Traefik
+- **There is no ECS, ECR, NLB, or EC2 deployment.** `./push-to-ecr.sh` is referenced by
+  older docs but does not exist in this repo
+
+### SMTP port architecture *(repo-verified in part)*
+- The app listens on **2525**, not 25, to avoid privileged-port issues in containers
+  (`EXPOSE 2525 8080` in the Dockerfile) *(repo-verified)*
+- Port 25 → 2525 translation is handled by the fronting proxy on the host *(reported)*
+
+### Legacy files, retained but not live
+- `devops/task-definition.json` — ECS task definition. Dead; the ECS path is retired
+- `devops/nginx/inboxnegative.conf` — nginx vhost, superseded by Traefik *(reported)*
+- `docs/aws-deployment.md` — the full AWS/ECS runbook, kept for history only
+
+These are left in place rather than deleted so the old topology stays recoverable, but
+**nothing in them describes how the service is deployed today.**
+
+### Why this section carries provenance markers
+`CLAUDE.md` is the first file agents and new contributors read, so a stale line here is
+not a documentation nicety — it becomes a confidently wrong premise that gets acted on.
+This section was wrong about production twice during the 2026-08 migration: it named
+Neon as the live database (causing a rotated credential to be assessed as live), and it
+described an ECS deployment that no longer existed. The recurring failure mode was
+checking a proxy and reporting it as the property — an old image for current source,
+filenames for content. Marking each claim with how it was checked is meant to make that
+substitution visible instead of invisible.

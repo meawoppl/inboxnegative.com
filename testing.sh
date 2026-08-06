@@ -30,7 +30,7 @@ cargo build --release
 cd ..
 
 # Run the application
-echo "Starting inboxnull in testing mode..."
+echo "Starting inboxnegative in testing mode..."
 echo "SMTP server running on port 2525"
 echo "HTTP server running on port 8080"
 echo ""
@@ -41,4 +41,4 @@ echo "- App with testing mode: http://localhost:8080?testing=true"
 echo "  (Use the 'Use Test Account' button on the login screen)"
 echo "============================================"
 echo ""
-"$(pwd)/target/release/inboxnull"
+"$(pwd)/target/release/inboxnegative"
