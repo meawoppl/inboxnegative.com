@@ -631,6 +631,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_static_assets() {
+        crate::jwt_key::init_for_tests();
         let response = simple_file_send("/").await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
@@ -657,6 +658,7 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn cookies_are_secure_outside_testing_mode() {
+        crate::jwt_key::init_for_tests();
         let restore = std::env::var("TESTING_MODE").ok();
         // SAFETY: #[serial] -- no other thread reads the environment concurrently.
         unsafe { std::env::remove_var("TESTING_MODE") };
@@ -682,6 +684,7 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn cookies_are_not_secure_in_testing_mode() {
+        crate::jwt_key::init_for_tests();
         let restore = std::env::var("TESTING_MODE").ok();
         // SAFETY: as above.
         unsafe { std::env::set_var("TESTING_MODE", "true") };
@@ -710,6 +713,7 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn cookies_are_not_httponly_until_frontend_stops_reading_them() {
+        crate::jwt_key::init_for_tests();
         let restore = std::env::var("TESTING_MODE").ok();
         // SAFETY: as above.
         unsafe { std::env::remove_var("TESTING_MODE") };
@@ -736,6 +740,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_index_sets_cookie() {
+        crate::jwt_key::init_for_tests();
         let req: Request<MockBody> = Request::builder()
             .method("GET") // You can specify other methods like POST, PUT, DELETE, etc.
             .uri("/index.html") // Set the URI for the request
@@ -865,6 +870,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_test_login_enabled_in_testing_mode() {
+        crate::jwt_key::init_for_tests();
         let email_stats = Arc::new(RwLock::new(EmailStats::new()));
         let attachment_store = Arc::new(AttachmentStore::new(300));
         let req: Request<MockBody> = Request::builder()
@@ -901,6 +907,7 @@ mod tests {
 
     #[test]
     fn test_is_authenticated_valid_cookie() {
+        crate::jwt_key::init_for_tests();
         let email_hash = hash_email_simple("person@example.com");
         let token = generate_token(&email_hash, Duration::days(1)).unwrap();
         let req: Request<MockBody> = Request::builder()
@@ -915,6 +922,7 @@ mod tests {
 
     #[test]
     fn test_is_authenticated_tampered_cookie() {
+        crate::jwt_key::init_for_tests();
         let email_hash = hash_email_simple("person@example.com");
         let token = generate_token(&email_hash, Duration::days(1)).unwrap();
         // Flip the final character to break the signature.

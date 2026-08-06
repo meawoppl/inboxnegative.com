@@ -5,12 +5,28 @@ use jwt::{SignWithKey, VerifyWithKey};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::error;
+use std::sync::OnceLock;
 use uuid::Uuid;
 
-// NOTE(meawoppl) we are a functionally stateless app, this could be
-// generated any time the binary starts?
-// TODO(meawoppl) move this const out of shared
-const JWT_SECRET: &[u8] = b"01923503-b671-70c9-a020-c4903647f69b";
+/// HMAC key for both the auth and OAuth-state tokens, supplied at startup.
+///
+/// This was a compiled-in constant. In a public repository that is a complete
+/// authentication bypass, not merely a bad practice: the auth token's subject is
+/// the user's burner address, and burner addresses are public by design -- handing
+/// them to third parties is the product. Anyone able to read this file could mint a
+/// valid session for any address they had ever received mail from.
+///
+/// The frontend never signs or verifies; it only calls the `unsafe_decode_*`
+/// helpers, which parse without a key. So the key is set by the backend alone and
+/// never reaches the wasm bundle.
+static JWT_SECRET: OnceLock<Vec<u8>> = OnceLock::new();
+
+/// Install the signing key. Call once during startup, before anything issues or
+/// validates a token. Later calls are ignored, so the key cannot change under a
+/// running process and invalidate tokens it just handed out.
+pub fn init_secret(secret: Vec<u8>) {
+    let _ = JWT_SECRET.set(secret);
+}
 
 pub const STATE_COOKIE_NAME: &str = "inboxnegative_state";
 pub const AUTH_COOKIE_NAME: &str = "inboxnegative_jwt";
@@ -72,8 +88,28 @@ pub struct InboxNegativeJWT {
     pub expiry: i64,
 }
 
+/// Fixed key for unit tests, so the suite is hermetic. In release builds this is
+/// `None`, so an uninitialised key panics at the first signing attempt rather than
+/// silently falling back to a well-known default -- which is the failure this whole
+/// change exists to remove.
+#[cfg(test)]
+fn test_fallback() -> Option<&'static [u8]> {
+    Some(b"test-jwt-secret-not-used-in-production")
+}
+
+#[cfg(not(test))]
+fn test_fallback() -> Option<&'static [u8]> {
+    None
+}
+
 fn get_hmac() -> Hmac<Sha256> {
-    Hmac::new_from_slice(JWT_SECRET).unwrap()
+    let secret = JWT_SECRET.get_or_init(|| {
+        test_fallback()
+            .expect("jwt::init_secret() must run before any token is signed or validated")
+            .to_vec()
+    });
+    // Hmac accepts a key of any length, so this cannot fail for a non-empty secret.
+    Hmac::new_from_slice(secret).expect("HMAC accepts keys of any length")
 }
 
 pub fn generate_token(email: &str, duration: Duration) -> Result<String, Box<dyn error::Error>> {

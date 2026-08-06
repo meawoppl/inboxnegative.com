@@ -4,6 +4,7 @@ mod build_info;
 mod db;
 mod deleted;
 mod http;
+mod jwt_key;
 mod oauth;
 mod salt;
 mod smtp;
@@ -84,6 +85,23 @@ async fn main() -> std::io::Result<()> {
     if let Err(e) = salt::init() {
         error!("❌ Refusing to start: {}", e);
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, e));
+    }
+
+    // Install the JWT signing key before anything can issue or check a token.
+    // Unlike the salts this one is safe to change -- it signs sessions and derives
+    // no stored data -- so a missing value generates a fresh key rather than
+    // refusing to boot.
+    match jwt_key::init() {
+        jwt_key::KeySource::Environment => {
+            info!("🔑 JWT signing key loaded from {}", jwt_key::JWT_SECRET_VAR);
+        }
+        jwt_key::KeySource::Generated => {
+            info!(
+                "🔑 Generated a random JWT signing key ({} unset). Existing sessions \
+                 are invalidated and will not survive the next restart.",
+                jwt_key::JWT_SECRET_VAR
+            );
+        }
     }
 
     let term_flag = attach_signal_watcher();
