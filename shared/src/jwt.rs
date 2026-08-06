@@ -43,13 +43,21 @@ pub fn generate_state_token(
     let state_token = OauthStateToken::new(client_id, duration);
     let secret = get_hmac();
 
-    let encoded = state_token.sign_with_key(&secret).unwrap();
+    // `?`, not `.unwrap()`: this runs on every index.html request, since the state
+    // cookie is set for every landing-page visitor. That is the hottest path in the
+    // app and not a place to panic.
+    let encoded = state_token.sign_with_key(&secret)?;
     Ok(encoded)
 }
 
 pub fn validate_state_token(token: &str) -> Result<OauthStateToken, Box<dyn error::Error>> {
     let secret = get_hmac();
-    let state_token: OauthStateToken = token.verify_with_key(&secret).unwrap();
+    // `?`, not `.unwrap()`. This is reached with attacker-controlled input -- the
+    // `state` query parameter of the unauthenticated /api/oauth callback -- so a
+    // failed signature must be a rejection, not a panic. `validate_token` below
+    // always got this right; this one did not, which silently defeated the caller's
+    // own error handling at backend/src/http.rs:387.
+    let state_token: OauthStateToken = token.verify_with_key(&secret)?;
 
     if !state_token.is_valid() {
         return Err("Token Expired".into());
@@ -154,5 +162,52 @@ mod tests {
         let state_token = validate_state_token(&token).unwrap();
 
         assert_eq!(state_token.client_id, "foo");
+    }
+
+    /// `validate_state_token` is reached with attacker-controlled input: the `state`
+    /// query parameter of the unauthenticated `/api/oauth` callback. It used to
+    /// `.unwrap()` the signature check, so every one of these panicked the request
+    /// handler instead of returning the 403 the caller was already written to send.
+    ///
+    /// Verified to fail against the pre-fix code rather than assumed: restoring the
+    /// `.unwrap()` makes this panic at `jwt.rs:59`.
+    #[test]
+    fn state_token_rejects_garbage_without_panicking() {
+        for bad in [
+            "",
+            "not-a-jwt",
+            "a.b.c",
+            "../../etc/passwd",
+            // Structurally valid JWT, signed with the wrong key.
+            "eyJhbGciOiJIUzI1NiJ9.eyJjbGllbnRfaWQiOiJmb28iLCJleHBpcnkiOjk5OTk5OTk5OTl9.\
+             AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        ] {
+            assert!(
+                validate_state_token(bad).is_err(),
+                "expected Err, not a panic, for {bad:?}"
+            );
+        }
+    }
+
+    /// A token whose signature verifies but which has expired must also be a plain
+    /// `Err`. That path was already correct; pinned so the fix above cannot regress
+    /// it into accepting stale tokens.
+    #[test]
+    fn state_token_rejects_expired() {
+        let token = generate_state_token("foo".to_string(), Duration::days(-1)).unwrap();
+        assert!(validate_state_token(&token).is_err());
+    }
+
+    /// The same guarantee for the auth token, which was already using `?`. Pinned so
+    /// the two validators cannot drift apart again -- that asymmetry is exactly what
+    /// hid the bug, since the correct one sat a few lines below the broken one.
+    #[test]
+    fn auth_token_rejects_garbage_without_panicking() {
+        for bad in ["", "not-a-jwt", "a.b.c"] {
+            assert!(
+                validate_token(bad.to_string()).is_err(),
+                "expected Err, not a panic, for {bad:?}"
+            );
+        }
     }
 }
