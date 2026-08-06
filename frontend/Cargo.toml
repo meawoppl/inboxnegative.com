@@ -6,7 +6,9 @@ edition = "2021"
 [dependencies]
 base64 = "0.22.1"
 futures-util = "0.3.30"
-gloo = {version = "0.11.0"}
+# default-features = false drops gloo-worker, which is the only route to the
+# unmaintained bincode (RUSTSEC-2025-0141). We use console and net only.
+gloo = {version = "0.11.0", default-features = false, features = ["console", "net"]}
 gloo-net = "0.6.0"
 chrono = {version="0.4.38", features = ["serde"]}
 serde_json = "1.0.127"
