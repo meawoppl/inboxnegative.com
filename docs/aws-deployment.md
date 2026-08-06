@@ -252,7 +252,9 @@ Run the deployment:
 
 ### Task Definition
 
-The ECS task definition is stored in `devops/task-definition.json`:
+The ECS task definition used to live at `devops/task-definition.json`. That file has
+been deleted — the ECS path is retired and nothing read it. It is reproduced in full
+below, which is the only remaining copy:
 
 ```json
 {
