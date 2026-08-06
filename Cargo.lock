@@ -1489,6 +1489,7 @@ dependencies = [
  "mime_guess",
  "pretty_env_logger",
  "r2d2",
+ "rand",
  "reqwest",
  "rust-embed",
  "serde",
