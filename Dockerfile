@@ -20,10 +20,14 @@ COPY build-output/inboxnegative /usr/local/bin/inboxnegative
 RUN useradd -m -u 1001 -s /bin/bash appuser
 USER appuser
 
-# The ZMQ publisher binds a relative `ipc://local_publisher_<pid>` socket, which
-# is created in the working directory. Without this, cwd is `/`, which appuser
-# cannot write -- the bind fails with EACCES and takes the SMTP task down. The
-# old image ran as root, so `/` was writable and this never surfaced.
+# Historically this was load-bearing: the ZMQ publisher bound a *relative*
+# `ipc://local_publisher_<pid>` socket, so it landed in cwd. With `USER appuser`
+# and no WORKDIR, cwd was `/`, the bind failed EACCES, and the SMTP task took the
+# process down. The socket path is now absolute (ZMQ_SOCKET_DIR, else
+# XDG_RUNTIME_DIR, else /tmp), so that specific failure can no longer happen.
+#
+# Kept anyway: a writable cwd owned by the running user is a sane default, and
+# nothing should silently depend on cwd being `/` either.
 WORKDIR /home/appuser
 
 # SMTP (2525) and HTTP (8080)

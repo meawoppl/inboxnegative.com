@@ -36,6 +36,17 @@ logs the reason and exits rather than starting. There is deliberately no fallbac
 without a database, deletion counts read back as zero for every user while the
 service otherwise looks healthy, which is far harder to notice than a failed boot.
 
+### ZMQ socket location
+
+The backend publishes internal messages over a ZMQ `ipc://` socket. Its path is
+absolute and configurable:
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ZMQ_SOCKET_DIR` | `$XDG_RUNTIME_DIR`, else `/tmp` | Must be absolute and writable. A relative value is refused and the default used instead, so the socket never depends on the working directory. |
+
+The socket file is named `local_publisher_<pid>` and is removed on clean shutdown.
+
 ### Testing Mode
 
 When developing or testing locally, you can use the testing mode to bypass Google OAuth authentication:
