@@ -31,7 +31,13 @@ jobs:
       # assets into the release binary.
       - name: Build frontend (release)
         run: cd frontend && trunk build --release
+      # BUILD_REVISION is stated outright rather than left to build.rs's `git
+      # rev-parse` fallback: on a PR the checkout sits on a synthetic merge commit,
+      # so HEAD is not the revision anyone means. The binary reports this at startup
+      # and at /api/version.
       - name: Build backend (release, embeds frontend assets)
+        env:
+          BUILD_REVISION: ${{ github.sha }}
         run: cargo build --release --locked -p inboxnegative
       - name: Assemble build-output
         run: |

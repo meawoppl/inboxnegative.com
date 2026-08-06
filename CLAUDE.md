@@ -107,16 +107,61 @@ Notes:
   reason and exits; there is no file-based fallback
 - Local development reads `DATABASE_URL` from `backend/.env` (gitignored). Production
   runs a self-hosted `postgres:17-alpine` container, **not** Neon — the Neon project
-  was retired during the 2026-08 GHCR migration
+  was retired during the 2026-08 GHCR migration and has since been deleted (issue #3)
+  *(host-verified 2026-08-06)*
+
+## Hash salts — do not change these values
+
+`EMAIL_SALT` and `DELETED_SALT` are **required** environment variables. `salt::init()`
+refuses to boot without them, by design: booting with different salts would silently
+produce different addresses and stats keys, orphaning every existing record rather
+than failing.
+
+**Their values must never change.** `EMAIL_SALT` derives every public burner address
+ever handed out, and `DELETED_SALT` is the primary key into `email_stats` — 1411 rows
+as of the 2026-08 cutover. Rotating either is not a credential rotation; it is a
+silent data loss event, and nothing in the code will complain.
+
+Sourced from 1Password at
+`op://meawoppl-infrastructure/inboxnegative/{email_salt,deleted_salt}` and injected
+into `/opt/services/env/inboxnegative.env` on the host *(host-verified 2026-08-06)*.
+Ordering matters on deploy: **the env must be live before the image that needs it**,
+or the container will not start.
+
+Defined in `backend/src/salt.rs` (`EMAIL_SALT_VAR`, `DELETED_SALT_VAR`). If you change
+how salts are read, preserve both the fail-fast and the exact byte sequence fed to the
+hash — `backend/src/deleted.rs::tests::test_hash_with_salt_is_salt_then_email` pins the
+ordering as salt-then-email so an accidental swap fails loudly instead of silently
+re-keying every record.
 
 ## Infrastructure
 
-> **Last verified against the repository: 2026-08-05.** Claims below are split by
-> how they were checked. Anything marked *(repo-verified)* was read out of a file
-> in this tree. Anything marked *(reported)* comes from issue #4 and the 2026-08
-> migration notes and was **not** independently confirmed against a running host —
-> treat it as the best available account, not as ground truth, and re-check before
-> relying on it for anything destructive.
+> **Last verified: 2026-08-06.** Claims below are split by how they were checked.
+> *(repo-verified)* was read out of a file in this tree. *(host-verified)* was
+> inspected directly on the deployment host on 2026-08-06 by the
+> meawoppl-infrastructure session (`72f72c15`), which has SSH access; this repo
+> cannot confirm those independently, so they are as good as that session's
+> observation and no better. *(reported)* is second-hand and confirmed by nobody —
+> re-check before relying on it for anything destructive.
+>
+> Nothing in this repo describes the deployment host: there is no compose file,
+> and no Traefik or Watchtower reference anywhere in the tree. Every host fact
+> below therefore has to be attributed rather than asserted.
+
+### Knowing what is actually running *(repo-verified)*
+The binary reports its own build provenance, so "what is serving?" does not have to be
+inferred from a container image label — a label describes the image, not the process
+that loaded it.
+
+- **Startup log line**, first thing emitted: `inboxnegative <version> revision <sha>`.
+  It prints before salt and database init, so it survives a failed boot. Prefer this
+  for gating: it needs no authenticated request.
+- **`GET /api/version`** → `{"version":"…","revision":"…"}`. Unauthenticated; it
+  exposes only the revision of an already-public repo.
+
+The revision comes from `BUILD_REVISION` if set (CI passes `github.sha`), else
+`git rev-parse HEAD` with `-dirty` appended for an unclean tree, else `"unknown"`.
+See `backend/build.rs` and `backend/src/build_info.rs`.
 
 ### Build and image *(repo-verified)*
 - CI builds a release binary and pushes an image to **GHCR**, not ECR:
@@ -130,24 +175,72 @@ Notes:
 - The Dockerfile **has** a `HEALTHCHECK` hitting `/api/health` — it has been there since
   #69/#71. Do not describe it as missing; check the file rather than a deployed image
 
-### Deployment *(reported)*
-- GHCR image pulled on a single host, run under Docker Compose with Watchtower for
-  image updates, fronted by Traefik
-- **There is no ECS, ECR, NLB, or EC2 deployment.** `./push-to-ecr.sh` is referenced by
-  older docs but does not exist in this repo
+### Deployment *(host-verified 2026-08-06)*
+A single EC2 host, `44.224.90.181`, with everything under `/opt/services`.
+**`/opt/services` is not a git repository — files are copied to the host manually**,
+so there is no version control on the deployment config and no way to diff it from
+here. Treat any host config quoted in this file as a snapshot, not a source of truth.
 
-### SMTP port architecture *(repo-verified in part)*
+| Thing | Where |
+|---|---|
+| Compose file | `/opt/services/docker-compose.yml` |
+| Traefik dynamic config | `/opt/services/traefik/dynamic/mail.yml` (file provider; TCP routers for the `smtp` and `submission` entrypoints, both → `inboxnegative:2525`) |
+| Traefik static config | command-line args in the traefik service block of the compose file — there is no separate `traefik.yml` |
+| Image in use | `ghcr.io/meawoppl/inboxnegative.com:latest` |
+| Database | self-hosted `postgres:17-alpine` on the same box, reachable on the docker network as `host=postgres`, database `inboxnegative` |
+
+`inboxnegative` is gated on the database with
+`depends_on: postgres: condition: service_healthy`. This matters because pool
+failure is fatal (see Database Information above) — without the gate, a slow
+Postgres start means the app exits instead of waiting. **The gate does not cover
+host reboots:** Docker's restart policy starts containers without compose's
+dependency ordering, so `restart: unless-stopped` is what recovers that case, by
+retrying until Postgres is up.
+
+**There is no ECS, ECR, NLB, or EC2-with-ECS-agent deployment.** `./push-to-ecr.sh`
+is referenced by older docs and does not exist in this repo.
+
+### Watchtower *(host-verified 2026-08-06)*
+Auto-deploys `:latest` unattended. `WATCHTOWER_POLL_INTERVAL=300`,
+`WATCHTOWER_LABEL_ENABLE=true`, `WATCHTOWER_CLEANUP=true`,
+`WATCHTOWER_INCLUDE_RESTARTING=true`. Observed lag from merge to live is about six
+minutes. Enrolment is **opt-in** via the label
+`com.centurylinklabs.watchtower.enable=true`; five containers are enrolled
+(`inboxnegative`, `agent-proxy`, `agentive-inversion`, `pastebom`, `rps-arena`).
+
+Two failure modes worth knowing before trusting it:
+- `LABEL_ENABLE=true` means an **unlabelled container is silently never scanned**.
+  That is half of why this service ran six months stale — CI published to GHCR while
+  the container carried no Watchtower label.
+- Watchtower has **no health gating and no notifier configured**. It will happily
+  deploy a crash-looping image and tell nobody. Separate host alerting covers this.
+
+Practical consequence: **anything merged to `main` is live within ~6 minutes with no
+human in the loop.** Behaviour changes that affect startup — the fatal database
+pool, the ZMQ socket path — reach production on that timer.
+
+### SMTP port architecture
 - The app listens on **2525**, not 25, to avoid privileged-port issues in containers
   (`EXPOSE 2525 8080` in the Dockerfile) *(repo-verified)*
-- Port 25 → 2525 translation is handled by the fronting proxy on the host *(reported)*
+- Host port 25 → Traefik → `inboxnegative:2525`. Answering from the box with
+  `220 inboxnegative.com SMTP Server DTF` *(host-verified 2026-08-06)*
+- **This has not been verified from off-host recently.** The last external check was
+  during the 2026-08-04 cutover. A 2026-08-06 attempt was inconclusive because
+  outbound 25 was blocked at the checking end, not because the service failed.
+  Reaching the SMTP listener from the host chain and reaching it from the internet
+  are different claims; only the former is currently evidenced.
 
 ### Legacy files, retained but not live
 - `devops/task-definition.json` — ECS task definition. Dead; the ECS path is retired
-- `devops/nginx/inboxnegative.conf` — nginx vhost, superseded by Traefik *(reported)*
+- `devops/nginx/inboxnegative.conf` — nginx vhost. Superseded: Traefik does the
+  routing *(host-verified 2026-08-06)*
 - `docs/aws-deployment.md` — the full AWS/ECS runbook, kept for history only
 
 These are left in place rather than deleted so the old topology stays recoverable, but
-**nothing in them describes how the service is deployed today.**
+**nothing in them describes how the service is deployed today.** Note both `devops/`
+files are also reproduced verbatim inside `docs/aws-deployment.md`
+(`task-definition.json` at its ECS Deployment section, the nginx vhost including the
+HTTPS block at its SSL section), so deleting the directory would lose nothing.
 
 ### Why this section carries provenance markers
 `CLAUDE.md` is the first file agents and new contributors read, so a stale line here is
@@ -158,3 +251,18 @@ described an ECS deployment that no longer existed. The recurring failure mode w
 checking a proxy and reporting it as the property — an old image for current source,
 filenames for content. Marking each claim with how it was checked is meant to make that
 substitution visible instead of invisible.
+
+That failure mode is not hypothetical here. `.cargo/audit.toml` once suppressed
+RUSTSEC-2024-0421 on the stated grounds that "idna is not in the active dependency
+tree" — while `idna` was in fact reachable on normal edges via `url` from `ammonia`,
+`reqwest`, `tower-http`, and `shared` directly. A live advisory sat silently
+suppressed behind a premise that was false when written, because nothing re-checks a
+rationale once it is in the file. Hence: state the *condition*, and say how you
+checked it.
+
+The tiers are ordered by how easily a claim can be re-derived, not by confidence.
+*(repo-verified)* can be re-checked by anyone reading this tree, so it decays
+loudly — the file it cites will contradict it. *(host-verified)* cannot be
+re-checked from here at all and decays **silently**: the host can change with
+nothing in this repo registering it. Carry the date and the session forward when
+you touch those lines, and prefer re-verifying to copying.
