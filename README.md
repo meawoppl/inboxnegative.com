@@ -31,7 +31,10 @@ InboxNull now supports using a PostgreSQL database for statistics:
    - Create necessary tables if they don't exist
    - Migrate any existing stats from the JSON file to the database
 
-If the database connection fails, the application will automatically fall back to file-based storage.
+The database is required. If the connection pool cannot be created, the application
+logs the reason and exits rather than starting. There is deliberately no fallback:
+without a database, deletion counts read back as zero for every user while the
+service otherwise looks healthy, which is far harder to notice than a failed boot.
 
 ### Testing Mode
 

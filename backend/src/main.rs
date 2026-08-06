@@ -123,30 +123,33 @@ async fn main() -> std::io::Result<()> {
         std::env::var("STATS_PATH").unwrap_or_else(|_| String::from("email_stats.json"));
     let stats_path = Path::new(&stats_path_str);
 
-    // Initialize the database connection pool
+    // The database is required, not optional. Continuing without it produces a
+    // service that looks healthy while reporting every user's deletion count as
+    // zero -- `get_count` falls through to an empty in-memory map, and `inc`
+    // errors per recipient. Refusing to boot is recoverable in minutes; booting
+    // wrong is not, because nothing looks broken. Same reasoning as `salt::init`.
     let db_pool = match db::create_pool() {
         Ok(pool) => {
             info!("✅ Connected to database successfully");
-            Some(pool)
+            pool
         }
         Err(e) => {
-            warn!("⚠️ Failed to connect to database: {}", e);
-            warn!("⚠️ Falling back to file-based storage");
-            None
+            error!(
+                "❌ Refusing to start: could not create database pool: {:#}",
+                e
+            );
+            return Err(std::io::Error::other(e.to_string()));
         }
     };
 
     // Load the stats from file or create new ones
     let mut stats = EmailStats::load(stats_path).unwrap_or(EmailStats::new());
 
-    // Attach the database pool if available
-    if let Some(pool) = db_pool.as_ref() {
-        stats.set_db_pool(Arc::clone(pool));
+    stats.set_db_pool(db_pool);
 
-        // Migrate existing stats to the database if needed
-        if let Err(e) = stats.migrate_to_db() {
-            warn!("⚠️ Failed to migrate stats to database: {}", e);
-        }
+    // Migrate existing stats to the database if needed
+    if let Err(e) = stats.migrate_to_db() {
+        warn!("⚠️ Failed to migrate stats to database: {}", e);
     }
 
     let email_stats = Arc::new(RwLock::new(stats));
