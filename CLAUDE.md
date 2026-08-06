@@ -230,17 +230,18 @@ pool, the ZMQ socket path — reach production on that timer.
   Reaching the SMTP listener from the host chain and reaching it from the internet
   are different claims; only the former is currently evidenced.
 
-### Legacy files, retained but not live
-- `devops/task-definition.json` — ECS task definition. Dead; the ECS path is retired
-- `devops/nginx/inboxnegative.conf` — nginx vhost. Superseded: Traefik does the
-  routing *(host-verified 2026-08-06)*
-- `docs/aws-deployment.md` — the full AWS/ECS runbook, kept for history only
+### Legacy files
+- `docs/aws-deployment.md` — the full AWS/ECS runbook, kept for history only. It
+  carries a HISTORICAL banner; **nothing in it describes how the service is deployed
+  today**, and no account ID, ARN, IP, or hostname in it is live.
 
-These are left in place rather than deleted so the old topology stays recoverable, but
-**nothing in them describes how the service is deployed today.** Note both `devops/`
-files are also reproduced verbatim inside `docs/aws-deployment.md`
-(`task-definition.json` at its ECS Deployment section, the nginx vhost including the
-HTTPS block at its SSL section), so deleting the directory would lose nothing.
+`devops/` was **deleted** (2026-08-06). It held `task-definition.json` and
+`nginx/inboxnegative.conf`, both dead — the ECS path is retired and Traefik does the
+routing *(host-verified 2026-08-06)*. Nothing referenced either file, and both are
+reproduced inside `docs/aws-deployment.md`: the nginx vhost verbatim, including the
+HTTPS block, and the task definition structurally identical with placeholder values
+redacted. The runbook is now the only copy, which is the appropriate number for
+config describing infrastructure that no longer exists.
 
 ### Why this section carries provenance markers
 `CLAUDE.md` is the first file agents and new contributors read, so a stale line here is
