@@ -161,6 +161,7 @@ async fn response_routing(
     if req.uri().path().starts_with("/api") {
         return match (req.method(), req.uri().path()) {
             (&Method::GET, "/api/health") => Ok(health_check(&req)),
+            (&Method::GET, "/api/version") => Ok(version_info()),
             (&Method::GET, "/api/oauth") => oauth_redirect_target(req).await,
             (&Method::GET, "/api/stats") => Ok(get_stats(req, email_stats)),
             (&Method::GET, "/api/email") => simple_stream_send_new(req, attachment_store).await,
@@ -222,6 +223,17 @@ fn health_check(req: &Request<impl Body>) -> Response<BoxBody<Bytes, std::io::Er
     Response::builder()
         .status(StatusCode::OK)
         .body(Full::new("OK\n".into()).map_err(|e| match e {}).boxed())
+        .unwrap()
+}
+
+/// Build provenance of the running binary. Unauthenticated on purpose: it reveals
+/// only the revision of an already-public repository, and gating it would defeat
+/// the point of being able to ask a running container what it is.
+fn version_info() -> Response<BoxBody<Bytes, std::io::Error>> {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/json")
+        .body(full_body(Bytes::from(crate::build_info::as_json())))
         .unwrap()
 }
 
@@ -845,6 +857,36 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    /// Deployment tooling reads this to confirm what is serving, so it has to work
+    /// unauthenticated and report the same revision the startup log line does.
+    #[tokio::test]
+    async fn build_app_serves_version_via_oneshot() {
+        use tower::ServiceExt;
+        let app = build_app(test_state(false));
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/version")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("Content-Type").unwrap(),
+            "application/json"
+        );
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(body.contains(crate::build_info::REVISION), "{body}");
+        assert!(body.contains(crate::build_info::VERSION), "{body}");
     }
 
     #[tokio::test]

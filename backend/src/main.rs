@@ -1,5 +1,6 @@
 mod addresses;
 mod attachments;
+mod build_info;
 mod db;
 mod deleted;
 mod http;
@@ -47,6 +48,11 @@ async fn spawn_testing_message_sender() -> std::result::Result<(), Box<dyn std::
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     pretty_env_logger::init();
+
+    // First line out, before anything can fail. Deployment tooling reads this to
+    // confirm what is actually serving rather than inferring it from an image
+    // label, so it must survive a boot that dies at salt or database init.
+    info!("{}", build_info::summary());
 
     // Set up panic hook to capture stack traces
     std::panic::set_hook(Box::new(|panic_info| {

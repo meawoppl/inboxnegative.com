@@ -148,6 +148,21 @@ re-keying every record.
 > and no Traefik or Watchtower reference anywhere in the tree. Every host fact
 > below therefore has to be attributed rather than asserted.
 
+### Knowing what is actually running *(repo-verified)*
+The binary reports its own build provenance, so "what is serving?" does not have to be
+inferred from a container image label — a label describes the image, not the process
+that loaded it.
+
+- **Startup log line**, first thing emitted: `inboxnegative <version> revision <sha>`.
+  It prints before salt and database init, so it survives a failed boot. Prefer this
+  for gating: it needs no authenticated request.
+- **`GET /api/version`** → `{"version":"…","revision":"…"}`. Unauthenticated; it
+  exposes only the revision of an already-public repo.
+
+The revision comes from `BUILD_REVISION` if set (CI passes `github.sha`), else
+`git rev-parse HEAD` with `-dirty` appended for an unclean tree, else `"unknown"`.
+See `backend/build.rs` and `backend/src/build_info.rs`.
+
 ### Build and image *(repo-verified)*
 - CI builds a release binary and pushes an image to **GHCR**, not ECR:
   `ghcr.io/meawoppl/inboxnegative.com`, tagged `latest` and the commit SHA
