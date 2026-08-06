@@ -310,8 +310,19 @@ fn make_auth_cookie(jwt_encoded: String, expiry: DateTime<Utc>) -> String {
     let is_testing =
         std::env::var("TESTING_MODE").unwrap_or_else(|_| "false".to_string()) == "true";
 
+    // `Secure` outside testing mode: production is HTTPS-only through Traefik, so
+    // without it the browser would send this JWT in cleartext to anything answering
+    // plain HTTP -- which is not hypothetical while port 8080 is reachable directly
+    // (see issue #16). `SameSite=Strict` does not cover this; it constrains
+    // cross-site requests, not transport. Testing mode is the one path that is
+    // legitimately plain HTTP on localhost, where `Secure` would suppress the cookie.
+    //
+    // Deliberately NOT `HttpOnly`: the frontend reads this cookie from JavaScript
+    // (`frontend/src/main.rs:359`). Adding it here would silently log everyone out.
+    // Fixing that properly needs a server-provided-identity refactor -- see issue #18.
     let mut builder = cookie::CookieBuilder::new(AUTH_COOKIE_NAME, jwt_encoded)
         .same_site(cookie::SameSite::Strict)
+        .secure(!is_testing)
         .path("/")
         .expires(converted_time);
 
@@ -345,8 +356,12 @@ fn make_state_cookie() -> String {
     let is_testing =
         std::env::var("TESTING_MODE").unwrap_or_else(|_| "false".to_string()) == "true";
 
+    // Same reasoning as the auth cookie. Also not `HttpOnly`: the frontend reads this
+    // one too, and at `frontend/src/main.rs:345` it `.unwrap()`s the lookup -- so
+    // hiding it from JS would be a panic on load rather than a graceful degrade.
     let mut builder = cookie::CookieBuilder::new(STATE_COOKIE_NAME, state_token)
         .same_site(cookie::SameSite::Strict)
+        .secure(!is_testing)
         .path("/")
         .expires(OffsetDateTime::from_unix_timestamp((Utc::now() + duration).timestamp()).unwrap());
 
@@ -634,6 +649,89 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    /// Both cookies carry a JWT, and production is HTTPS-only through Traefik.
+    /// Without `Secure` the browser sends them in cleartext to anything answering
+    /// plain HTTP, which port 8080 currently does (issue #16).
+    #[test]
+    #[serial_test::serial]
+    fn cookies_are_secure_outside_testing_mode() {
+        let restore = std::env::var("TESTING_MODE").ok();
+        // SAFETY: #[serial] -- no other thread reads the environment concurrently.
+        unsafe { std::env::remove_var("TESTING_MODE") };
+
+        for raw in [
+            make_auth_cookie("jwt".into(), Utc::now()),
+            make_state_cookie(),
+        ] {
+            let parsed = cookie::Cookie::parse(raw.clone()).unwrap();
+            assert_eq!(parsed.secure(), Some(true), "expected Secure in {raw}");
+        }
+
+        unsafe {
+            match restore {
+                Some(v) => std::env::set_var("TESTING_MODE", v),
+                None => std::env::remove_var("TESTING_MODE"),
+            }
+        }
+    }
+
+    /// The inverse matters just as much: testing mode is plain HTTP on localhost,
+    /// where a `Secure` cookie is silently dropped by the browser and login breaks.
+    #[test]
+    #[serial_test::serial]
+    fn cookies_are_not_secure_in_testing_mode() {
+        let restore = std::env::var("TESTING_MODE").ok();
+        // SAFETY: as above.
+        unsafe { std::env::set_var("TESTING_MODE", "true") };
+
+        for raw in [
+            make_auth_cookie("jwt".into(), Utc::now()),
+            make_state_cookie(),
+        ] {
+            let parsed = cookie::Cookie::parse(raw.clone()).unwrap();
+            assert_ne!(parsed.secure(), Some(true), "unexpected Secure in {raw}");
+        }
+
+        unsafe {
+            match restore {
+                Some(v) => std::env::set_var("TESTING_MODE", v),
+                None => std::env::remove_var("TESTING_MODE"),
+            }
+        }
+    }
+
+    /// Guards the frontend, not the backend. `frontend/src/main.rs` reads both
+    /// cookies from `document.cookie` and `.unwrap()`s the state lookup, so adding
+    /// `HttpOnly` here logs everyone out and panics the page. It is the right end
+    /// state, but it needs the refactor in #18 first -- this test is here so the
+    /// one-line version fails loudly instead of shipping.
+    #[test]
+    #[serial_test::serial]
+    fn cookies_are_not_httponly_until_frontend_stops_reading_them() {
+        let restore = std::env::var("TESTING_MODE").ok();
+        // SAFETY: as above.
+        unsafe { std::env::remove_var("TESTING_MODE") };
+
+        for raw in [
+            make_auth_cookie("jwt".into(), Utc::now()),
+            make_state_cookie(),
+        ] {
+            let parsed = cookie::Cookie::parse(raw.clone()).unwrap();
+            assert_ne!(
+                parsed.http_only(),
+                Some(true),
+                "HttpOnly breaks the frontend until #18 lands: {raw}"
+            );
+        }
+
+        unsafe {
+            match restore {
+                Some(v) => std::env::set_var("TESTING_MODE", v),
+                None => std::env::remove_var("TESTING_MODE"),
+            }
+        }
     }
 
     #[tokio::test]
