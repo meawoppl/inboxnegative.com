@@ -49,6 +49,13 @@ EXPOSE 2525 8080
 # 90s of tolerance is safe here because /api/health is pure liveness -- it takes no
 # state, touches no database, and returns a static body. If it ever starts checking
 # the pool, this becomes a tolerance for a Postgres hiccup and should be revisited.
+#
+# Confirmed live 2026-08-07: outage span 6s, down from ~30s. One side effect worth
+# knowing before you tune this again -- `State.Health.Log` keeps only the last 5
+# probes, so retained history is `interval x 5`. At 5s that is a 25s evidence
+# window, down from 150s. Shortening the interval shortened the outage and the
+# ability to diagnose it by the same factor; read the health log within ~20s of a
+# recreate or the probes you want will already be evicted.
 HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=18 \
     CMD curl -f http://localhost:8080/api/health || exit 1
 

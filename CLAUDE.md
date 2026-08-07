@@ -219,6 +219,33 @@ Practical consequence: **anything merged to `main` is live within ~6 minutes wit
 human in the loop.** Behaviour changes that affect startup — the fatal database
 pool, the ZMQ socket path — reach production on that timer.
 
+### What a deploy looks like from outside *(host-verified 2026-08-07)*
+Every Watchtower recreate causes a brief user-visible outage. Measured by polling the
+public URL every 2s through a real cycle:
+
+```
+00:54:45   200 -> 502     old container gone, Traefik route still present
+00:54:48   502 -> 404     route withdrawn
+00:54:52   404 -> 200     healthy, route restored
+```
+
+**It is two failure modes in sequence, not one.** A deploy serves **502 first, then
+404**. That matters for alerting: a rule watching only 404 misses the leading edge,
+and a rule watching only 502 will call a routine deploy a backend crash. Both are
+just a deploy.
+
+The span is **~6s**, down from ~30s — see the `HEALTHCHECK` comment in the
+`Dockerfile` for why the interval is the window. Note that container-health alerting
+structurally *cannot* see this: throughout the outage the container is either gone or
+healthy, never unhealthy.
+
+**Re-measuring this has a trap.** `State.Health.Log` is a ring buffer of the **last 5
+entries**, so the retained probe history is `interval x 5` — at the current 5s
+interval that is only **25 seconds**. Shortening the interval shortened the outage
+*and* the evidence window by the same factor. Read the health log within ~20s of a
+recreate or it will have already evicted the probes you came for. At the old 30s
+interval the buffer spanned 150s and this was not a concern.
+
 ### SMTP port architecture
 - The app listens on **2525**, not 25, to avoid privileged-port issues in containers
   (`EXPOSE 2525 8080` in the Dockerfile) *(repo-verified)*
