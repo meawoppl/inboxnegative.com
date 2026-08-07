@@ -3,4 +3,5 @@ pub mod deleted;
 pub mod email;
 pub mod google_oauth;
 pub mod jwt;
+pub mod session;
 pub mod stats;

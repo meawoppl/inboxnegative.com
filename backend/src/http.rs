@@ -12,7 +12,7 @@ use http_body::Body;
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::{Method, Request, Response, Result, StatusCode};
 use log::{debug, error, info};
-use shared::google_oauth::{decode_oauth_callback, OauthCheckRequest};
+use shared::google_oauth::{decode_oauth_callback, get_oauth_url, OauthCheckRequest};
 use shared::jwt::{
     generate_state_token, generate_token, validate_state_token, validate_token, InboxNegativeJWT,
     AUTH_COOKIE_NAME, STATE_COOKIE_NAME,
@@ -32,18 +32,21 @@ fn get_google_client_secret() -> String {
     std::env::var("GOOGLE_CLIENT_SECRET").unwrap_or_else(|_| "test-client-secret".to_string())
 }
 
+/// Parse the `Cookie` header. Delegates to `shared::cookies`, which splits on the
+/// first `=` and skips malformed pairs.
+///
+/// This previously indexed `parts[1]` after splitting, so a header with no `=` in
+/// it -- `Cookie: novalue` -- panicked the request handler with an index-out-of-
+/// bounds. It also `unwrap()`ed `to_str()`, which panics on non-UTF-8 header bytes.
+/// Both are unauthenticated and one header away, and `/api/session` is reached
+/// through here, so neither is acceptable on this path.
 fn extract_cookies(req: &Request<impl Body>) -> HashMap<String, String> {
-    let mut cookies = HashMap::new();
-    for (key, value) in req.headers().iter() {
-        if key == "Cookie" {
-            let cookie_str = value.to_str().unwrap();
-            for cookie in cookie_str.split("; ") {
-                let parts: Vec<&str> = cookie.split('=').collect();
-                cookies.insert(parts[0].to_string(), parts[1].to_string());
-            }
-        }
-    }
-    cookies
+    req.headers()
+        .get_all("Cookie")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(shared::cookies::all_raw)
+        .collect()
 }
 
 fn is_authenticated(
@@ -162,6 +165,7 @@ async fn response_routing(
         return match (req.method(), req.uri().path()) {
             (&Method::GET, "/api/health") => Ok(health_check(&req)),
             (&Method::GET, "/api/version") => Ok(version_info()),
+            (&Method::GET, "/api/session") => Ok(session_info(&req)),
             (&Method::GET, "/api/oauth") => oauth_redirect_target(req).await,
             (&Method::GET, "/api/stats") => Ok(get_stats(req, email_stats)),
             (&Method::GET, "/api/email") => simple_stream_send_new(req, attachment_store).await,
@@ -224,6 +228,58 @@ fn health_check(req: &Request<impl Body>) -> Response<BoxBody<Bytes, std::io::Er
         .status(StatusCode::OK)
         .body(Full::new("OK\n".into()).map_err(|e| match e {}).boxed())
         .unwrap()
+}
+
+/// Public root this service is reached on. Used to build the OAuth redirect back
+/// to ourselves; it was previously hardcoded in the frontend.
+const PUBLIC_ROOT: &str = "https://inboxnegative.com";
+
+/// Everything the frontend needs to render, so it never has to read a cookie.
+///
+/// This is what makes `HttpOnly` possible on both cookies. The identity here comes
+/// from `validate_token`, which verifies the signature -- the frontend previously
+/// used `unsafe_decode_token`, so its notion of who you were came from a token it
+/// never checked.
+///
+/// Unauthenticated by design: signed out, it returns `email: null` plus a login
+/// URL, which is exactly what a logged-out visitor needs.
+fn session_info(req: &Request<impl Body>) -> Response<BoxBody<Bytes, std::io::Error>> {
+    let email = is_authenticated(req).ok().map(|jwt| jwt.email);
+
+    // Prefer the state token already in the request, so the `state` in the OAuth
+    // URL matches the cookie the browser holds. Minting a fresh one is a correct
+    // fallback -- `oauth_redirect_target` validates the token by signature, not by
+    // comparing it to the cookie -- but keeping them equal preserves the option of
+    // enforcing that match later as CSRF protection.
+    let state = extract_cookies(req)
+        .get(STATE_COOKIE_NAME)
+        .cloned()
+        .or_else(|| generate_state_token(get_google_client_id(), Duration::days(1)).ok());
+
+    let session = shared::session::SessionInfo {
+        email,
+        oauth_url: state
+            .map(|state| get_oauth_url(PUBLIC_ROOT, &state, &get_google_client_id()))
+            .unwrap_or_default(),
+    };
+
+    match serde_json::to_string(&session) {
+        Ok(json) => Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/json")
+            // Identity varies per request; a cache must never serve one user's
+            // session document to another.
+            .header("Cache-Control", "no-store")
+            .body(full_body(Bytes::from(json)))
+            .unwrap(),
+        Err(e) => {
+            error!("Error serializing session info: {}", e);
+            Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(full_body(Bytes::from("Error processing session")))
+                .unwrap()
+        }
+    }
 }
 
 /// Build provenance of the running binary. Unauthenticated on purpose: it reveals
@@ -317,12 +373,14 @@ fn make_auth_cookie(jwt_encoded: String, expiry: DateTime<Utc>) -> String {
     // cross-site requests, not transport. Testing mode is the one path that is
     // legitimately plain HTTP on localhost, where `Secure` would suppress the cookie.
     //
-    // Deliberately NOT `HttpOnly`: the frontend reads this cookie from JavaScript
-    // (`frontend/src/main.rs:359`). Adding it here would silently log everyone out.
-    // Fixing that properly needs a server-provided-identity refactor -- see issue #18.
+    // `HttpOnly` since #18: the frontend no longer reads this cookie. It gets the
+    // signed-in address from `/api/session`, so the token itself is opaque to JS.
+    // This is what bounds a `clean_html` bypass to defacement rather than session
+    // theft, on a service that renders HTML from arbitrary senders.
     let mut builder = cookie::CookieBuilder::new(AUTH_COOKIE_NAME, jwt_encoded)
         .same_site(cookie::SameSite::Strict)
         .secure(!is_testing)
+        .http_only(true)
         .path("/")
         .expires(converted_time);
 
@@ -356,12 +414,13 @@ fn make_state_cookie() -> String {
     let is_testing =
         std::env::var("TESTING_MODE").unwrap_or_else(|_| "false".to_string()) == "true";
 
-    // Same reasoning as the auth cookie. Also not `HttpOnly`: the frontend reads this
-    // one too, and at `frontend/src/main.rs:345` it `.unwrap()`s the lookup -- so
-    // hiding it from JS would be a panic on load rather than a graceful degrade.
+    // Also `HttpOnly` since #18. The frontend used to read this to extract the OAuth
+    // client ID and build a login URL; `/api/session` now returns a finished URL, so
+    // there is nothing left for JS to want here.
     let mut builder = cookie::CookieBuilder::new(STATE_COOKIE_NAME, state_token)
         .same_site(cookie::SameSite::Strict)
         .secure(!is_testing)
+        .http_only(true)
         .path("/")
         .expires(OffsetDateTime::from_unix_timestamp((Utc::now() + duration).timestamp()).unwrap());
 
@@ -705,37 +764,70 @@ mod tests {
         }
     }
 
-    /// Guards the frontend, not the backend. `frontend/src/main.rs` reads both
-    /// cookies from `document.cookie` and `.unwrap()`s the state lookup, so adding
-    /// `HttpOnly` here logs everyone out and panics the page. It is the right end
-    /// state, but it needs the refactor in #18 first -- this test is here so the
-    /// one-line version fails loudly instead of shipping.
+    /// The inverse of the guard this replaces. `HttpOnly` is what bounds a
+    /// `clean_html` bypass to defacement instead of session theft, so it must stay
+    /// set on both cookies -- and unlike `Secure` it applies in testing mode too,
+    /// since it has nothing to do with transport.
     #[test]
     #[serial_test::serial]
-    fn cookies_are_not_httponly_until_frontend_stops_reading_them() {
+    fn cookies_are_httponly_in_every_mode() {
         crate::jwt_key::init_for_tests();
         let restore = std::env::var("TESTING_MODE").ok();
-        // SAFETY: as above.
-        unsafe { std::env::remove_var("TESTING_MODE") };
 
-        for raw in [
-            make_auth_cookie("jwt".into(), Utc::now()),
-            make_state_cookie(),
-        ] {
-            let parsed = cookie::Cookie::parse(raw.clone()).unwrap();
-            assert_ne!(
-                parsed.http_only(),
-                Some(true),
-                "HttpOnly breaks the frontend until #18 lands: {raw}"
-            );
+        for mode in ["true", "false"] {
+            // SAFETY: as above.
+            unsafe { std::env::set_var("TESTING_MODE", mode) };
+            for raw in [
+                make_auth_cookie("jwt".into(), Utc::now()),
+                make_state_cookie(),
+            ] {
+                let parsed = cookie::Cookie::parse(raw.clone()).unwrap();
+                assert_eq!(
+                    parsed.http_only(),
+                    Some(true),
+                    "TESTING_MODE={mode}: expected HttpOnly in {raw}"
+                );
+            }
         }
 
+        // SAFETY: as above.
         unsafe {
             match restore {
                 Some(v) => std::env::set_var("TESTING_MODE", v),
                 None => std::env::remove_var("TESTING_MODE"),
             }
         }
+    }
+
+    /// The acceptance criterion from #18, enforced rather than remembered: if the
+    /// frontend reads the auth cookie again, `HttpOnly` silently logs everyone out.
+    /// A grep is the cheapest check that survives people forgetting why.
+    #[test]
+    fn frontend_never_reads_the_auth_cookie() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("frontend")
+            .join("src");
+
+        let mut offenders = Vec::new();
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&dir).expect("frontend/src exists") {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            checked += 1;
+            let body = std::fs::read_to_string(&path).unwrap();
+            if body.contains("AUTH_COOKIE_NAME") || body.contains("unsafe_decode_token") {
+                offenders.push(path.display().to_string());
+            }
+        }
+
+        assert!(checked > 0, "expected to scan some frontend sources");
+        assert!(
+            offenders.is_empty(),
+            "frontend must not read identity from cookies -- see #18: {offenders:?}"
+        );
     }
 
     #[tokio::test]
@@ -963,6 +1055,119 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    /// Signed out, `/api/session` must still answer with a usable login URL --
+    /// that is the whole logged-out rendering path.
+    #[tokio::test]
+    async fn session_signed_out_returns_oauth_url_and_no_email() {
+        use tower::ServiceExt;
+        crate::jwt_key::init_for_tests();
+        let resp = build_app(test_state(false))
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/session")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers().get("Cache-Control").unwrap(), "no-store");
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let session: shared::session::SessionInfo =
+            serde_json::from_slice(&body).expect("valid SessionInfo JSON");
+
+        assert_eq!(session.email, None);
+        assert!(
+            session
+                .oauth_url
+                .starts_with("https://accounts.google.com/"),
+            "expected a Google OAuth URL, got {}",
+            session.oauth_url
+        );
+        assert!(
+            session.oauth_url.contains("state="),
+            "{}",
+            session.oauth_url
+        );
+    }
+
+    /// Signed in, it reports the address from a *verified* token.
+    #[tokio::test]
+    async fn session_signed_in_reports_verified_email() {
+        use tower::ServiceExt;
+        crate::jwt_key::init_for_tests();
+        let email_hash = "deadbeefdeadbeef@inboxnegative.com";
+        let token = generate_token(email_hash, Duration::days(1)).unwrap();
+
+        let resp = build_app(test_state(false))
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/session")
+                    .header("Cookie", format!("{AUTH_COOKIE_NAME}={token}"))
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let session: shared::session::SessionInfo = serde_json::from_slice(&body).unwrap();
+        assert_eq!(session.email.as_deref(), Some(email_hash));
+    }
+
+    /// A forged token must read as signed out, not as that user. This is exactly
+    /// the difference between `validate_token` and the `unsafe_decode_token` the
+    /// frontend used to call on a cookie it could not verify.
+    #[tokio::test]
+    async fn session_ignores_a_forged_token() {
+        use tower::ServiceExt;
+        crate::jwt_key::init_for_tests();
+        let resp = build_app(test_state(false))
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/session")
+                    .header("Cookie", format!("{AUTH_COOKIE_NAME}=not-a-real-token"))
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let session: shared::session::SessionInfo = serde_json::from_slice(&body).unwrap();
+        assert_eq!(session.email, None, "a forged token must not authenticate");
+    }
+
+    /// `Cookie: novalue` used to panic the handler on an index-out-of-bounds, and
+    /// `/api/session` is reached through the same parser.
+    #[tokio::test]
+    async fn malformed_cookie_header_does_not_panic() {
+        use tower::ServiceExt;
+        crate::jwt_key::init_for_tests();
+        for header in ["novalue", "a=1; novalue; b=2", "=", "; ;"] {
+            let resp = build_app(test_state(false))
+                .oneshot(
+                    axum::http::Request::builder()
+                        .uri("/api/session")
+                        .header("Cookie", header)
+                        .body(axum::body::Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK, "header {header:?}");
+        }
     }
 
     /// Deployment tooling reads this to confirm what is serving, so it has to work
