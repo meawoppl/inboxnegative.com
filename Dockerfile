@@ -33,7 +33,23 @@ WORKDIR /home/appuser
 # SMTP (2525) and HTTP (8080)
 EXPOSE 2525 8080
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+# Traefik's docker provider will not route to a container that is not yet healthy,
+# so this interval IS the user-visible outage window on every deploy -- not Traefik
+# lag. Docker schedules the first probe at `interval`, regardless of `start_period`,
+# so a 30s interval meant ~30s of 404s even though the app was serving within
+# seconds. Measured on the host 2026-08-07: container started 00:40:45.711, first
+# probe 00:41:15.722 (+30.011s), passed on the first attempt.
+#
+# `interval x retries` is also time-to-unhealthy, and Traefik gates in BOTH
+# directions -- so dropping the interval alone would have made the service six
+# times twitchier about a transient blip, trading a predictable window at deploy
+# time for unpredictable ones at arbitrary times. `retries` is raised to hold that
+# product at 90s: 5 x 18 == 30 x 3.
+#
+# 90s of tolerance is safe here because /api/health is pure liveness -- it takes no
+# state, touches no database, and returns a static body. If it ever starts checking
+# the pool, this becomes a tolerance for a Postgres hiccup and should be revisited.
+HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=18 \
     CMD curl -f http://localhost:8080/api/health || exit 1
 
 CMD ["inboxnegative"]
