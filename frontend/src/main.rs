@@ -11,35 +11,15 @@ use gloo_timers::callback::Interval;
 use shared::deleted::UserStats;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::spawn_local;
-use web_sys::HtmlDocument;
 use web_sys::MessageEvent;
 use yew::{html, html::Scope, Callback, Component, Context, Html};
 
-use shared::cookies::all_raw;
 use shared::email::Email;
-use shared::google_oauth;
-use shared::jwt::{
-    self, unsafe_decode_state_token, InboxNegativeJWT, AUTH_COOKIE_NAME, STATE_COOKIE_NAME,
-};
+use shared::session::SessionInfo;
 
 use crate::email::EmailFrame;
 use crate::intro::IntroScreen;
 use crate::toast::Toast;
-
-fn document() -> HtmlDocument {
-    use wasm_bindgen::JsCast;
-
-    web_sys::window()
-        .unwrap()
-        .document()
-        .unwrap()
-        .dyn_into::<HtmlDocument>()
-        .unwrap()
-}
-
-pub fn cookie_string() -> String {
-    document().cookie().unwrap()
-}
 
 fn format_number_with_commas(n: i64) -> String {
     let s = n.to_string();
@@ -77,6 +57,22 @@ fn unpack_message(event: &MessageEvent) -> Option<Email> {
             None
         }
     }
+}
+
+/// Fetch server-supplied identity and login URL. Replaces reading `document.cookie`.
+pub async fn get_session() -> Result<SessionInfo, JsValue> {
+    let resp = Request::get("/api/session")
+        .send()
+        .await
+        .map_err(|e| JsValue::from_str(&format!("Failed to GET session: {:?}", e)))?;
+
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| JsValue::from_str(&format!("Failed to read session body: {:?}", e)))?;
+
+    serde_json::from_str(&text)
+        .map_err(|e| JsValue::from_str(&format!("Failed to parse session: {:?}", e)))
 }
 
 pub async fn get_deleted_stats(link: Scope<App>) -> Result<(), JsValue> {
@@ -142,6 +138,7 @@ pub async fn read_emails(url: String, link: Scope<App>) -> Result<(), JsValue> {
 // Define the possible messages which can be sent to the component
 pub enum Msg {
     AddEmail(Email),
+    SessionLoaded(SessionInfo),
     DeleteEmail(String), // Delete by UUID
     StartStream,
     GetDeletedUpdate,
@@ -151,6 +148,9 @@ pub enum Msg {
 }
 
 pub struct App {
+    /// Server-supplied identity and login URL. `None` until `/api/session`
+    /// answers, which is why there is a loading branch in `view`.
+    session: Option<SessionInfo>,
     streaming: bool,
     emails: Vec<Email>,
     user_stats: UserStats,
@@ -186,12 +186,9 @@ fn copy_to_clipboard(text: String, link: Scope<App>) -> Callback<web_sys::MouseE
     })
 }
 
-fn emails_view(
-    emails: &[Email],
-    creds: InboxNegativeJWT,
-    link: Scope<App>,
-    user_stats: &UserStats,
-) -> Html {
+/// `email` is the signed-in user's burner address, supplied by `/api/session`
+/// rather than decoded from a cookie.
+fn emails_view(emails: &[Email], email: String, link: Scope<App>, user_stats: &UserStats) -> Html {
     html! {
         <div class="container">
             <div class="header">
@@ -228,10 +225,10 @@ fn emails_view(
                     <span
                         class="email-copy"
                         style="cursor: pointer; text-decoration: underline; color: #0066cc;"
-                        onclick={copy_to_clipboard(creds.email.clone(), link.clone())}
+                        onclick={copy_to_clipboard(email.clone(), link.clone())}
                         title="Click to copy email address"
                     >
-                        {&creds.email}
+                        {&email}
                     </span>
                 </p>
             </div>
@@ -275,7 +272,18 @@ impl Component for App {
             link.send_message(Msg::GetDeletedUpdate);
         });
 
+        // The frontend cannot read the auth cookie any more -- it is HttpOnly -- so
+        // identity has to be fetched. See #18.
+        let session_link = ctx.link().clone();
+        spawn_local(async move {
+            match get_session().await {
+                Ok(session) => session_link.send_message(Msg::SessionLoaded(session)),
+                Err(e) => log!(format!("Failed to load session: {:?}", e)),
+            }
+        });
+
         Self {
+            session: None,
             streaming: false,
             emails: Vec::new(),
             user_stats: UserStats::new(0, None),
@@ -311,6 +319,11 @@ impl Component for App {
                 self.streaming = true;
                 false
             }
+            Msg::SessionLoaded(session) => {
+                let changed = self.session.as_ref() != Some(&session);
+                self.session = Some(session);
+                changed
+            }
             Msg::GetDeletedUpdate => {
                 let del_link = ctx.link().clone();
                 spawn_local(async move {
@@ -341,24 +354,16 @@ impl Component for App {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let cookiez = all_raw(&cookie_string());
-        let state = cookiez.get(STATE_COOKIE_NAME).unwrap();
-
-        // Extract client_id from state cookie
-        let client_id = match unsafe_decode_state_token(state.clone()) {
-            Ok(state_token) => state_token.client_id,
-            Err(e) => {
-                log!(format!("Failed to decode state token: {:?}", e));
-                return html! { <div>{"Error loading configuration"}</div> };
-            }
+        // Identity comes from the server, not from `document.cookie`. Both cookies
+        // are HttpOnly, so this is the only way the page can know who you are --
+        // and it is derived from a signature-checked token rather than one the
+        // client decoded for itself. See #18.
+        let Some(session) = self.session.as_ref() else {
+            return html! { <div class="loading">{"Loading..."}</div> };
         };
 
-        let oauth_link =
-            google_oauth::get_oauth_url("https://inboxnegative.com", state, &client_id);
-
-        let auth = cookiez
-            .get(AUTH_COOKIE_NAME)
-            .map(|cookie| jwt::unsafe_decode_token(cookie.clone()).unwrap());
+        let oauth_link = session.oauth_url.clone();
+        let auth = session.email.clone();
 
         ctx.link().send_message(Msg::GetDeletedUpdate);
         html! {
@@ -370,9 +375,9 @@ impl Component for App {
                                 <IntroScreen oauth_link={oauth_link} user_stats={self.user_stats.clone()}/>
                             }
                         }
-                        Some(creds) => {
+                        Some(email) => {
                             ctx.link().send_message(Msg::StartStream);
-                            emails_view(&self.emails, creds, ctx.link().clone(), &self.user_stats)
+                            emails_view(&self.emails, email, ctx.link().clone(), &self.user_stats)
                         }
                     }
                 }
