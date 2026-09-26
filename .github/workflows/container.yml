@@ -44,7 +44,7 @@ jobs:
           mkdir -p build-output
           cp target/release/inboxnegative build-output/inboxnegative
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-output
           path: build-output
